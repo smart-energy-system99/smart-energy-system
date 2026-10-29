@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>محاكاة الإنذار المبكر</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap">
+<style>
+/* Layout: one mobile-first column. Status first, charts next, then the ground-truth strip, alert log and result. */
+:root {
+  --bg: #EEF3F7;
+  --surface: #FFFFFF;
+  --surface-2: #E4ECF3;
+  --fg: #0E1A2B;
+  --muted: #566a80;
+  --line: #CFDAE5;
+  --accent: #0B7C7A;
+  --accent-fg: #FFFFFF;
+  --ok: #1E8A55;
+  --warn: #A9690B;
+  --alarm: #C22F2F;
+  --ok-tint: #DDF1E6;
+  --warn-tint: #F8EBCF;
+  --alarm-tint: #F9DEDE;
+  --font-display: "Cairo", Tahoma, sans-serif;
+  --font-body: "IBM Plex Sans Arabic", Tahoma, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1626; --surface: #16294A; --surface-2: #1E3558; --fg: #F2F0E8; --muted: #9FB0C6;
+    --line: #2B4468; --accent: #5CC4BE; --accent-fg: #0B1626;
+    --ok: #4CC38A; --warn: #E9A23B; --alarm: #F26D6D;
+    --ok-tint: #17402F; --warn-tint: #463817; --alarm-tint: #4B2226;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B1626; --surface: #16294A; --surface-2: #1E3558; --fg: #F2F0E8; --muted: #9FB0C6;
+  --line: #2B4468; --accent: #5CC4BE; --accent-fg: #0B1626;
+  --ok: #4CC38A; --warn: #E9A23B; --alarm: #F26D6D;
+  --ok-tint: #17402F; --warn-tint: #463817; --alarm-tint: #4B2226;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6; direction: rtl;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(26px, 6vw, 36px); line-height: 1.25; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 800; font-size: 20px; margin: 0; }
+p { margin: 0; }
+.sub { color: var(--muted); font-size: 15px; max-width: 62ch; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 12px; }
+.tab { flex: 1; border: 0; background: transparent; padding: 10px 8px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.label { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); background: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: 15px; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.desc { color: var(--muted); font-size: 15px; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); padding: 10px 18px; border-radius: 10px; font-weight: 600; min-height: 44px; }
+.btn.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 10px 12px; min-height: 44px; min-width: 44px; }
+.seg button[aria-pressed="true"] { background: var(--surface-2); font-weight: 600; }
+.seed { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.seed input { width: 84px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); text-align: center; min-height: 44px; }
+.slider { display: flex; align-items: center; gap: 12px; }
+.slider input { flex: 1; direction: ltr; accent-color: var(--accent); min-width: 0; height: 28px; }
+.slider span { font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: start; color: var(--muted); font-size: 14px; }
+
+.status { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 16px; border: 1px solid transparent; }
+.status[data-s="NORMAL"] { background: var(--ok-tint); border-color: var(--ok); }
+.status[data-s="WARNING"] { background: var(--warn-tint); border-color: var(--warn); }
+.status[data-s="ALARM"] { background: var(--alarm-tint); border-color: var(--alarm); }
+.status .big { display: flex; align-items: center; gap: 12px; font-family: var(--font-display); font-weight: 800; font-size: 34px; line-height: 1.1; }
+.status[data-s="NORMAL"] .big { color: var(--ok); }
+.status[data-s="WARNING"] .big { color: var(--warn); }
+.status[data-s="ALARM"] .big { color: var(--alarm); }
+.dot { width: 22px; height: 22px; border-radius: 50%; background: currentColor; flex: none; }
+.status[data-s="ALARM"] .dot { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(.7); opacity: .6; } }
+@media (prefers-reduced-motion: reduce) { .status[data-s="ALARM"] .dot { animation: none; } }
+.status .msg { font-weight: 600; }
+.status .truth { color: var(--muted); font-size: 14px; }
+
+.metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 640px) { .metrics { grid-template-columns: repeat(4, 1fr); } }
+.metric { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; }
+.metric b { font-family: var(--font-display); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; direction: ltr; text-align: right; }
+.metric small { color: var(--muted); font-size: 13px; }
+
+.chartbox { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.chartbox svg { display: block; width: 100%; height: auto; direction: ltr; }
+.chartbox .cap { font-size: 13px; color: var(--muted); }
+.axis-text { fill: var(--muted); font-size: 11px; font-family: var(--font-body); }
+.grid { stroke: var(--line); stroke-width: 1; }
+.band-ok { fill: var(--ok); opacity: .12; }
+.band-warn { fill: var(--warn); opacity: .12; }
+.lim-warn { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.lim-alarm { stroke: var(--alarm); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.trace { fill: none; stroke: var(--muted); stroke-width: 1; opacity: .5; }
+.pt-NORMAL { fill: var(--ok); } .pt-WARNING { fill: var(--warn); } .pt-ALARM { fill: var(--alarm); }
+.cursor { stroke: var(--fg); stroke-width: 1; opacity: .35; }
+
+.strips { display: flex; flex-direction: column; gap: 6px; }
+.strip { display: flex; align-items: center; gap: 10px; }
+.strip .label { width: 72px; flex: none; }
+.cells { flex: 1; display: flex; gap: 1px; direction: ltr; height: 22px; min-width: 0; }
+.cell { flex: 1; border-radius: 2px; background: var(--surface-2); }
+.cell.NORMAL { background: var(--ok); } .cell.WARNING { background: var(--warn); } .cell.ALARM { background: var(--alarm); }
+.cell.future { opacity: .22; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-inline-end: 6px; }
+
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
+.log li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.log time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 3.2em; }
+.tag { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; flex: none; }
+.tag.NORMAL { background: var(--ok-tint); color: var(--ok); }
+.tag.WARNING { background: var(--warn-tint); color: var(--warn); }
+.tag.ALARM { background: var(--alarm-tint); color: var(--alarm); }
+.empty { color: var(--muted); font-size: 15px; }
+
+.result { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.verdict { font-family: var(--font-display); font-weight: 800; padding: 4px 16px; border-radius: 999px; font-size: 18px; }
+.verdict.PASS { background: var(--ok-tint); color: var(--ok); }
+.verdict.FAIL { background: var(--alarm-tint); color: var(--alarm); }
+.kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 100%; }
+@media (min-width: 640px) { .kv { grid-template-columns: repeat(4, 1fr); } }
+.kv div { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; }
+.kv b { font-size: 20px; font-variant-numeric: tabular-nums; font-family: var(--font-display); }
+.kv small { color: var(--muted); font-size: 13px; }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 15px; }
+th, td { padding: 10px 8px; text-align: start; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 13px; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+.open { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 4px 12px; min-height: 36px; }
+
+details.panel > summary { cursor: pointer; font-family: var(--font-display); font-weight: 800; font-size: 20px; }
+.sliders { display: grid; grid-template-columns: 1fr; gap: 14px; }
+@media (min-width: 640px) { .sliders { grid-template-columns: 1fr 1fr; gap: 14px 24px; } }
+.sl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 15px; }
+.sl input { grid-column: 1 / -1; direction: ltr; accent-color: var(--accent); width: 100%; height: 28px; min-width: 0; }
+.sl output { font-variant-numeric: tabular-nums; font-weight: 600; direction: ltr; }
+.notif { background: var(--surface-2); border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; max-width: 420px; }
+.notif b { font-weight: 600; }
+.n-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.n-head time { margin-inline-start: auto; font-variant-numeric: tabular-nums; direction: ltr; }
+.n-ico { width: 18px; height: 18px; border-radius: 5px; background: var(--accent); flex: none; }
+.n-ico.ALARM { background: var(--alarm); } .n-ico.WARNING { background: var(--warn); } .n-ico.NORMAL { background: var(--ok); }
+.note { font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+html{color-scheme:light}
+:root[data-theme="dark"],:root{}
+body{margin:0}
+img{max-width:100%}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:8px">
+    <h1>محاكاة نظام الإنذار المبكر</h1>
+    <p class="sub">اختار عطل، وشوف النظام بيكتشفه إزاي ثانية بثانية، وقارن اللي النظام قاله باللي المفروض يقوله.</p>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-run" aria-selected="true" aria-controls="view-run">تشغيل سيناريو</button>
+    <button class="tab" role="tab" id="tab-all" aria-selected="false" aria-controls="view-all">تقرير كل السيناريوهات</button>
+  </div>
+
+  <main id="view-run" style="display:flex;flex-direction:column;gap:16px">
+    <section class="panel">
+      <span class="label">السيناريو</span>
+      <div class="chips" id="chips"></div>
+      <p class="desc" id="desc"></p>
+      <div class="controls">
+        <button class="btn" id="play" type="button">▶ شغّل من الأول</button>
+        <div class="seg" role="group" aria-label="سرعة التشغيل" id="speed">
+          <button type="button" data-v="1" aria-pressed="true">1×</button>
+          <button type="button" data-v="3" aria-pressed="false">3×</button>
+          <button type="button" data-v="8" aria-pressed="false">8×</button>
+        </div>
+        <label class="seed"><span class="label">seed</span><input id="seed" type="number" min="0" max="9999" value="42" inputmode="numeric"></label>
+      </div>
+      <div class="slider"><input id="step" type="range" min="1" max="60" value="60" aria-label="الثانية الحالية"><span id="steplabel"></span></div>
+    </section>
+
+    <details class="panel" id="limits">
+      <summary>ضبط الحدود بإيدك</summary>
+      <p class="desc">غيّر حدود الإنذار وشوف النظام بيتصرف إزاي. الرسم والنتيجة بيتحدّثوا فورًا.</p>
+      <div class="sliders" id="limit-sliders"></div>
+      <div><button class="btn ghost" id="lim-reset" type="button">رجّع الحدود الأصلية</button></div>
+    </details>
+
+    <section class="status" id="status" data-s="NORMAL" aria-live="polite">
+      <div class="big"><span class="dot"></span><span id="stext">طبيعي</span></div>
+      <p class="msg" id="smsg"></p>
+      <p class="truth" id="struth"></p>
+    </section>
+
+    <section class="panel">
+      <h2>الإشعار اللي هيوصل على الموبايل</h2>
+      <div class="notif" id="notif" aria-live="polite"></div>
+    </section>
+
+    <div class="metrics">
+      <div class="metric"><small>الجهد (V)</small><b id="m-v">0</b></div>
+      <div class="metric"><small>التيار (A)</small><b id="m-i">0</b></div>
+      <div class="metric"><small>القدرة (W)</small><b id="m-p">0</b></div>
+      <div class="metric"><small>الطاقة (kWh)</small><b id="m-e">0</b></div>
+    </div>
+
+    <section class="panel">
+      <div class="chartbox"><h2>الجهد</h2><div id="chart-v"></div>
+        <p class="cap" id="cap-v"></p></div>
+      <div class="chartbox"><h2>التيار</h2><div id="chart-i"></div>
+        <p class="cap" id="cap-i"></p></div>
+    </section>
+
+    <section class="panel">
+      <h2>المتوقع مقابل الفعلي</h2>
+      <div class="strips">
+        <div class="strip"><span class="label">المتوقع</span><div class="cells" id="strip-exp"></div></div>
+        <div class="strip"><span class="label">الفعلي</span><div class="cells" id="strip-act"></div></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--ok)"></i>طبيعي</span><span><i style="background:var(--warn)"></i>تحذير</span><span><i style="background:var(--alarm)"></i>إنذار</span></div>
+      <p class="cap" style="font-size:13px;color:var(--muted)">الفرق بين الصفين بيبان عند بداية العطل ونهايته. ده تأخير التثبيت: النظام مستني قراءتين متتاليتين قبل ما يغيّر الحالة.</p>
+    </section>
+
+    <section class="panel">
+      <h2>سجل الإنذارات</h2>
+      <ul class="log" id="log"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>نتيجة السيناريو كامل</h2>
+      <div class="result"><span class="verdict" id="r-verdict">PASS</span><span id="r-text" class="desc"></span></div>
+      <p class="desc" id="lim-note" hidden></p>
+      <span class="label">زمن اكتشاف كل عطل</span>
+      <ul class="log" id="detect"></ul>
+      <div class="kv">
+        <div><b id="r-acc">0</b><small>نسبة التطابق</small></div>
+        <div><b id="r-fa">0</b><small>إنذارات كاذبة</small></div>
+        <div><b id="r-miss">0</b><small>حالات فائتة</small></div>
+        <div><b id="r-delay">0</b><small>أقصى تأخير اكتشاف (ثانية)</small></div>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-all" hidden style="display:flex;flex-direction:column;gap:16px">
+    <section class="panel">
+      <h2>كل السيناريوهات مرة واحدة</h2>
+      <p class="desc">بتتشغل بنفس الـ seed (<b id="all-seed">42</b>). معيار النجاح: تطابق 95% أو أكتر، ولا مرحلة فاتت، وأقصى تأخير 5 ثواني.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>السيناريو</th><th>تطابق %</th><th>إنذارات كاذبة</th><th>حالات فائتة</th><th>أقصى تأخير</th><th>النتيجة</th><th></th></tr></thead>
+          <tbody id="all-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="note">
+    <p>البيانات والأعطال مولّدة بالكمبيوتر، و"المتوقع" جاي من تصميم السيناريو، مش من قياس على هاردوير.</p>
+    <p>المحاكاة بتثبت منطق الاكتشاف والإنذار. هي مش بتثبت إن دايرة تحويل كهربائية حقيقية هتشتغل بأمان؛ ده بيتقاس على الهاردوير لاحقًا.</p>
+    <p>الصفحة دي بتنقل منطق ملف analyzer.py بالظبط، لكن الأرقام العشوائية مختلفة عن نسخة Python، فالنسب ممكن تفرق شوية. طبقة الـ ML مش موجودة هنا.</p>
+  </footer>
+</div>
+
+<script>
+document.documentElement.lang = "ar";
+document.documentElement.dir = "rtl";
+
+// CORE-START
+const NORMAL = "NORMAL", WARNING = "WARNING", ALARM = "ALARM";
+const RANK = { NORMAL: 0, WARNING: 1, ALARM: 2 };
+const PF = 0.95;
+
+const NAMES = {
+  normal: "طبيعي", outage: "انقطاع", over_voltage: "ارتفاع جهد", under_voltage: "انخفاض جهد",
+  high_consumption: "استهلاك مرتفع", overcurrent: "تيار زائد", surge_on_restore: "ارتفاع عند عودة التيار",
+};
+const DESCS = {
+  normal: "تشغيل طبيعي بدون أي مشكلة. المفروض ما يظهرش أي إنذار.",
+  outage: "انقطاع كامل للكهرباء ثم عودتها.",
+  over_voltage: "ارتفاع الجهد: تحذير ثم إنذار ثم عودة للطبيعي.",
+  under_voltage: "انخفاض الجهد: تحذير ثم إنذار ثم عودة للطبيعي.",
+  high_consumption: "ارتفاع الاستهلاك فوق المعتاد (12 أمبير) من غير ما يتعدى الحد الخطر.",
+  overcurrent: "تيار زائد خطير (18.5 أمبير).",
+  surge_on_restore: "انقطاع ثم عودة التيار بجهد مرتفع لفترة قصيرة.",
+};
+const P = (name, samples, voltage, current, expected, vn = 1.5, inn = 0.2) => ({ name, samples, voltage, current, expected, vn, inn });
+const normalPhase = (n) => P("طبيعي", n, 220, 4, NORMAL);
+const SCENARIOS = {
+  normal: [normalPhase(60)],
+  outage: [normalPhase(20), P("انقطاع", 20, 0, 0, ALARM, 0, 0), normalPhase(20)],
+  over_voltage: [normalPhase(15), P("ارتفاع جهد (تحذير)", 10, 245, 4, WARNING), P("ارتفاع جهد (إنذار)", 15, 258, 4, ALARM), normalPhase(20)],
+  under_voltage: [normalPhase(15), P("انخفاض جهد (تحذير)", 10, 190, 4, WARNING), P("انخفاض جهد (إنذار)", 15, 172, 4, ALARM), normalPhase(20)],
+  high_consumption: [normalPhase(15), P("استهلاك مرتفع", 20, 220, 12, WARNING), normalPhase(15)],
+  overcurrent: [normalPhase(15), P("تيار زائد", 15, 220, 18.5, ALARM), normalPhase(15)],
+  surge_on_restore: [normalPhase(15), P("انقطاع", 15, 0, 0, ALARM, 0, 0), P("ارتفاع مفاجئ عند عودة التيار", 5, 262, 4, ALARM), normalPhase(20)],
+};
+
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return (h ^= h >>> 16) >>> 0; };
+}
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function makeGauss(rand) {
+  return (mu, sigma) => mu + sigma * Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+}
+
+function generate(name, seed) {
+  const rand = mulberry32(xmur3(name + "-" + seed)());
+  const gauss = makeGauss(rand);
+  let energy = 0, t = 0;
+  const rows = [];
+  SCENARIOS[name].forEach((ph, phaseId) => {
+    for (let k = 0; k < ph.samples; k++) {
+      const v = ph.voltage ? Math.max(0, gauss(ph.voltage, ph.vn)) : 0;
+      const i = ph.current ? Math.max(0, gauss(ph.current, ph.inn)) : 0;
+      const p = v * i * PF;
+      energy += p / 3600000;
+      rows.push({ t: ++t, voltage: +v.toFixed(1), current: +i.toFixed(2), power: Math.round(p), energy: +energy.toFixed(6),
+        phaseId, phase: ph.name, expected: ph.expected });
+    }
+  });
+  return rows;
+}
+
+const LIM = { vOutage: 50, vAlarmLow: 180, vWarnLow: 200, vWarnHigh: 240, vAlarmHigh: 250, iWarn: 10, iAlarm: 16 };
+const LIM_DEFAULT = { ...LIM };
+const median = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+class Analyzer {
+  constructor() {
+    this.status = NORMAL; this.pending = NORMAL; this.pendingN = 0;
+    this.vHist = []; this.pBase = []; this.lastAlerts = [];
+  }
+  classify(v, i, p) {
+    let status = NORMAL; const alerts = [];
+    const flag = (lvl, msg) => { alerts.push(msg); if (RANK[lvl] > RANK[status]) status = lvl; };
+    if (v < LIM.vOutage) flag(ALARM, "انقطاع الكهرباء");
+    else if (v < LIM.vAlarmLow) flag(ALARM, `انخفاض شديد في الجهد (${v.toFixed(0)} V)`);
+    else if (v < LIM.vWarnLow) flag(WARNING, `انخفاض في الجهد (${v.toFixed(0)} V)`);
+    else if (v > LIM.vAlarmHigh) flag(ALARM, `ارتفاع شديد في الجهد (${v.toFixed(0)} V)`);
+    else if (v > LIM.vWarnHigh) flag(WARNING, `ارتفاع في الجهد (${v.toFixed(0)} V)`);
+    if (i > LIM.iAlarm) flag(ALARM, `تيار زائد (${i.toFixed(1)} A)`);
+    else if (i > LIM.iWarn) flag(WARNING, `استهلاك مرتفع (${i.toFixed(1)} A)`);
+    if (status !== NORMAL) return [status, alerts];
+
+    if (this.pBase.length >= 10) {
+      const base = median(this.pBase);
+      if (p > 1.8 * base && p - base > 300) {
+        flag(WARNING, `استهلاك غير معتاد (${p.toFixed(0)} W مقابل المعتاد ${base.toFixed(0)} W)`);
+        return [status, alerts];
+      }
+    }
+    if (this.vHist.length >= 3) {
+      if (v < 212 && Math.max(...this.vHist) - v >= 8) { flag(WARNING, `هبوط تدريجي في الجهد (${v.toFixed(0)} V)`); return [status, alerts]; }
+      if (v > 228 && v - Math.min(...this.vHist) >= 8) { flag(WARNING, `ارتفاع تدريجي في الجهد (${v.toFixed(0)} V)`); return [status, alerts]; }
+    }
+    return [status, alerts];
+  }
+  debounce(raw) {
+    if (raw === this.status) { this.pending = this.status; this.pendingN = 0; return this.status; }
+    if (raw === this.pending) this.pendingN++; else { this.pending = raw; this.pendingN = 1; }
+    if (this.pendingN >= 2) { this.status = raw; this.pending = raw; this.pendingN = 0; }
+    return this.status;
+  }
+  process(r) {
+    const v = r.voltage, i = r.current, p = r.power || v * i * PF;
+    const [raw, rawAlerts] = this.classify(v, i, p);
+    if (raw === NORMAL) { this.pBase.push(p); if (this.pBase.length > 30) this.pBase.shift(); }
+    this.vHist.push(v); if (this.vHist.length > 10) this.vHist.shift();
+    const status = this.debounce(raw);
+    let alerts;
+    if (status === NORMAL) alerts = [];
+    else if (rawAlerts.length) alerts = this.lastAlerts = rawAlerts;
+    else alerts = this.lastAlerts;
+    return { status, alerts: [...alerts] };
+  }
+}
+
+function run(name, seed) {
+  const rows = generate(name, seed);
+  const a = new Analyzer();
+  const results = rows.map((r) => a.process(r));
+  return { rows, results };
+}
+
+function evaluate(rows, results) {
+  let match = 0, falseAlarms = 0, missed = 0;
+  rows.forEach((r, k) => {
+    const e = RANK[r.expected], s = RANK[results[k].status];
+    if (r.expected === results[k].status) match++;
+    if (e === 0 && s > 0) falseAlarms++;
+    if (e > 0 && s === 0) missed++;
+  });
+  const phases = {};
+  rows.forEach((r, k) => { if (r.expected !== NORMAL) (phases[r.phaseId] ||= []).push(k); });
+  let undetected = 0, maxDelay = 0;
+  Object.values(phases).forEach((idx) => {
+    const need = RANK[rows[idx[0]].expected];
+    const hit = idx.findIndex((k) => RANK[results[k].status] >= need);
+    if (hit < 0) undetected++; else maxDelay = Math.max(maxDelay, hit);
+  });
+  const accuracy = Math.round((1000 * match) / rows.length) / 10;
+  return { accuracy, falseAlarms, missed, undetected, maxDelay,
+    pass: accuracy >= 95 && undetected === 0 && maxDelay <= 5 };
+}
+// CORE-END
+
+const $ = (id) => document.getElementById(id);
+const STATUS_AR = { NORMAL: "طبيعي", WARNING: "تحذير", ALARM: "إنذار" };
+const state = { name: "outage", seed: 42, data: null, step: 1, speed: 1, timer: null };
+
+function chartSVG(width, data, step, o) {
+  const W = Math.max(260, width), H = 190, L = 36, R = 10, T = 10, B = 24, n = data.length;
+  const x = (k) => L + ((W - L - R) * k) / (n - 1);
+  const y = (v) => T + (H - T - B) * (1 - (v - o.min) / (o.max - o.min));
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${o.label}">`;
+  o.ticks.forEach((t) => { s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`; });
+  o.bands.forEach((b) => { s += `<rect class="${b.cls}" x="${L}" width="${W - L - R}" y="${y(b.to)}" height="${y(b.from) - y(b.to)}"/>`; });
+  o.lines.forEach((l) => { s += `<line class="${l.cls}" x1="${L}" x2="${W - R}" y1="${y(l.y)}" y2="${y(l.y)}"/>`; });
+  for (let t = 0; t < n; t += 10) s += `<text class="axis-text" x="${x(t)}" y="${H - 6}" text-anchor="middle">${t + 1}</text>`;
+  s += `<text class="axis-text" x="${W - R}" y="${H - 6}" text-anchor="end"></text>`;
+  const vis = data.slice(0, step);
+  if (vis.length > 1) s += `<polyline class="trace" points="${vis.map((d, k) => `${x(k).toFixed(1)},${y(d.v).toFixed(1)}`).join(" ")}"/>`;
+  vis.forEach((d, k) => { s += `<circle class="pt-${d.s}" cx="${x(k).toFixed(1)}" cy="${y(d.v).toFixed(1)}" r="3"/>`; });
+  if (vis.length) { const k = vis.length - 1; s += `<line class="cursor" x1="${x(k)}" x2="${x(k)}" y1="${T}" y2="${H - B}"/><circle class="pt-${vis[k].s}" cx="${x(k)}" cy="${y(vis[k].v)}" r="6" style="stroke:var(--fg);stroke-width:2"/>`; }
+  return s + "</svg>";
+}
+
+function fmtSec(k) { return `ث ${k}`; }
+
+function render() {
+  const { rows, results } = state.data, n = rows.length, k = state.step - 1;
+  const cur = rows[k], res = results[k];
+
+  $("step").max = n; $("step").value = state.step;
+  $("steplabel").textContent = `ثانية ${state.step} / ${n}`;
+  $("play").textContent = state.timer ? "⏸ وقّف" : (state.step >= n ? "▶ شغّل من الأول" : "▶ كمّل");
+
+  $("status").dataset.s = res.status;
+  $("stext").textContent = STATUS_AR[res.status];
+  $("smsg").textContent = res.alerts.length ? res.alerts.join("؛ ") : "كل القراءات في الحدود الطبيعية.";
+  $("struth").textContent = `الحالة الحقيقية في السيناريو الآن: ${STATUS_AR[cur.expected]} (${cur.phase})`;
+
+  $("m-v").textContent = cur.voltage.toFixed(1);
+  $("m-i").textContent = cur.current.toFixed(2);
+  $("m-p").textContent = cur.power.toFixed(0);
+  $("m-e").textContent = cur.energy.toFixed(4);
+
+  const dv = rows.map((r, j) => ({ v: r.voltage, s: results[j].status }));
+  const di = rows.map((r, j) => ({ v: r.current, s: results[j].status }));
+  $("chart-v").innerHTML = chartSVG($("chart-v").clientWidth, dv, state.step, {
+    min: 0, max: 280, ticks: [0, 50, 100, 150, 200, 250], label: "رسم الجهد على مدار السيناريو",
+    bands: [{ from: LIM.vWarnLow, to: LIM.vWarnHigh, cls: "band-ok" }], lines: [{ y: LIM.vAlarmLow, cls: "lim-alarm" }, { y: LIM.vAlarmHigh, cls: "lim-alarm" }],
+  });
+  $("chart-i").innerHTML = chartSVG($("chart-i").clientWidth, di, state.step, {
+    min: 0, max: 20, ticks: [0, 5, 10, 15, 20], label: "رسم التيار على مدار السيناريو",
+    bands: [{ from: 0, to: LIM.iWarn, cls: "band-ok" }], lines: [{ y: LIM.iWarn, cls: "lim-warn" }, { y: LIM.iAlarm, cls: "lim-alarm" }],
+  });
+
+  $("cap-v").textContent = `المنطقة الخضراء هي الطبيعي (${LIM.vWarnLow} إلى ${LIM.vWarnHigh} V). الخط الأحمر المتقطع حد الإنذار (${LIM.vAlarmLow} و${LIM.vAlarmHigh} V).`;
+  $("cap-i").textContent = `أقل من ${LIM.iWarn} A طبيعي. الخط الأصفر حد التحذير (${LIM.iWarn} A) والأحمر حد الإنذار (${LIM.iAlarm} A).`;
+  $("strip-exp").innerHTML = rows.map((r) => `<div class="cell ${r.expected}"></div>`).join("");
+  $("strip-act").innerHTML = results.map((r, j) => `<div class="cell ${r.status}${j > k ? " future" : ""}"></div>`).join("");
+
+  const items = []; let prev = "";
+  for (let j = 0; j <= k; j++) {
+    const key = results[j].status + "|" + results[j].alerts.join("؛");
+    if (key === prev) continue;
+    const was = prev ? prev.split("|")[0] : NORMAL;
+    prev = key;
+    if (results[j].status === NORMAL) { if (was !== NORMAL) items.push({ t: rows[j].t, s: NORMAL, m: "رجع للطبيعي" }); }
+    else items.push({ t: rows[j].t, s: results[j].status, m: results[j].alerts.join("؛") });
+  }
+  renderNotif(items[items.length - 1]);
+  $("log").innerHTML = items.length
+    ? [...items].reverse().map((e) => `<li><time>${fmtSec(e.t)}</time><span class="tag ${e.s}">${STATUS_AR[e.s]}</span><span>${e.m}</span></li>`).join("")
+    : `<li class="empty" style="display:block;background:none;border:0">لسه مفيش إنذارات لحد الثانية دي.</li>`;
+}
+
+function renderResult() {
+  const ev = evaluate(state.data.rows, state.data.results);
+  const v = $("r-verdict"); v.textContent = ev.pass ? "PASS" : "FAIL"; v.className = "verdict " + (ev.pass ? "PASS" : "FAIL");
+  $("r-text").textContent = ev.pass ? "السيناريو عدّى معيار النجاح." : "السيناريو ما عدّاش معيار النجاح.";
+  $("r-acc").textContent = ev.accuracy + "%"; $("r-fa").textContent = ev.falseAlarms;
+  $("r-miss").textContent = ev.missed; $("r-delay").textContent = ev.maxDelay;
+  const changed = Object.keys(LIM_DEFAULT).some((k) => LIM[k] !== LIM_DEFAULT[k]);
+  $("lim-note").hidden = !changed;
+  $("lim-note").textContent = "الحدود معدّلة عن الأصل، لكن المتوقع ثابت من تصميم السيناريو. فلو النتيجة اتغيّرت، يبقى الحدود الجديدة بتخالف التصميم.";
+  const { rows, results } = state.data, groups = {};
+  rows.forEach((r, k) => { if (r.expected !== NORMAL) (groups[r.phaseId] ||= []).push(k); });
+  const lines = Object.values(groups).map((idx) => {
+    const need = RANK[rows[idx[0]].expected], start = rows[idx[0]].t;
+    const hit = idx.find((k) => RANK[results[k].status] >= need);
+    let txt;
+    if (hit === undefined) txt = "ما اتكتشفش";
+    else { const d = rows[hit].t - start; txt = `اتكتشف في ثانية ${rows[hit].t} (${d === 0 ? "فورًا" : d === 1 ? "بعد ثانية" : d <= 10 ? `بعد ${d} ثواني` : `بعد ${d} ثانية`})`; }
+    return `<li><span class="tag ${rows[idx[0]].expected}">${STATUS_AR[rows[idx[0]].expected]}</span><span>${rows[idx[0]].phase}: بدأ في ثانية ${start}، ${txt}</span></li>`;
+  });
+  $("detect").innerHTML = lines.length ? lines.join("") : `<li class="empty" style="display:block;background:none;border:0">السيناريو ده طبيعي، مفيش عطل لازم يتكتشف.</li>`;
+}
+
+function stop() { if (state.timer) { clearInterval(state.timer); state.timer = null; } }
+function load(name, seed, keepEnd = true) {
+  stop(); state.name = name; state.seed = seed; state.data = run(name, seed);
+  state.step = state.data.rows.length;
+  $("desc").textContent = DESCS[name];
+  document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.n === name)));
+  renderResult(); render();
+}
+function play() {
+  if (state.timer) { stop(); render(); return; }
+  const n = state.data.rows.length;
+  if (state.step >= n) state.step = 1;
+  state.timer = setInterval(() => {
+    if (state.step >= n) { stop(); render(); return; }
+    state.step++; render();
+  }, 1000 / state.speed);
+  render();
+}
+
+function buildAll() {
+  $("all-seed").textContent = state.seed;
+  $("all-body").innerHTML = Object.keys(SCENARIOS).map((nm) => {
+    const { rows, results } = run(nm, state.seed), e = evaluate(rows, results);
+    return `<tr><td>${NAMES[nm]}</td><td class="num">${e.accuracy}</td><td class="num">${e.falseAlarms}</td><td class="num">${e.missed}</td><td class="num">${e.maxDelay} ث</td><td><span class="verdict ${e.pass ? "PASS" : "FAIL"}" style="font-size:14px;padding:2px 12px">${e.pass ? "PASS" : "FAIL"}</span></td><td><button class="open" type="button" data-open="${nm}">افتح</button></td></tr>`;
+  }).join("");
+}
+
+function showTab(which) {
+  const run = which === "run";
+  $("view-run").hidden = !run; $("view-all").hidden = run;
+  $("tab-run").setAttribute("aria-selected", String(run)); $("tab-all").setAttribute("aria-selected", String(!run));
+  if (run) render(); else buildAll();
+}
+
+function renderNotif(e) {
+  const box = $("notif");
+  if (!e) { box.innerHTML = `<p class="empty">مفيش إشعارات لحد الثانية دي.</p>`; return; }
+  const sec = e.t - 1, clock = `12:${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+  const title = e.s === NORMAL ? "الكهرباء رجعت طبيعية" : e.s === ALARM ? "إنذار" : "تحذير";
+  const body = e.s === NORMAL ? "القراءات رجعت في الحدود الطبيعية." : e.m;
+  box.innerHTML = `<div class="n-head"><span class="n-ico ${e.s}"></span><span>نظام الإنذار المبكر</span><time>${clock}</time></div><b>${title}</b><span>${body}</span>`;
+}
+
+const SL = [
+  { k: "vAlarmLow", label: "حد إنذار انخفاض الجهد (V)", min: 150, max: 198, step: 1 },
+  { k: "vWarnLow", label: "حد تحذير انخفاض الجهد (V)", min: 182, max: 215, step: 1 },
+  { k: "vWarnHigh", label: "حد تحذير ارتفاع الجهد (V)", min: 225, max: 248, step: 1 },
+  { k: "vAlarmHigh", label: "حد إنذار ارتفاع الجهد (V)", min: 242, max: 275, step: 1 },
+  { k: "iWarn", label: "حد تحذير التيار (A)", min: 6, max: 14, step: 0.5 },
+  { k: "iAlarm", label: "حد إنذار التيار (A)", min: 12, max: 22, step: 0.5 },
+];
+function syncSliders() { SL.forEach((s) => { $("sl-" + s.k).value = LIM[s.k]; $("so-" + s.k).textContent = LIM[s.k]; }); }
+function buildSliders() {
+  $("limit-sliders").innerHTML = SL.map((s) => `<label class="sl"><span>${s.label}</span><output id="so-${s.k}"></output><input type="range" id="sl-${s.k}" min="${s.min}" max="${s.max}" step="${s.step}"></label>`).join("");
+  syncSliders();
+}
+function refresh() { state.data = run(state.name, state.seed); renderResult(); render(); }
+function onLimit(k, val) {
+  LIM[k] = val;
+  if (LIM.vAlarmLow > LIM.vWarnLow - 2) { if (k === "vAlarmLow") LIM.vWarnLow = LIM.vAlarmLow + 2; else LIM.vAlarmLow = LIM.vWarnLow - 2; }
+  if (LIM.vWarnHigh > LIM.vAlarmHigh - 2) { if (k === "vWarnHigh") LIM.vAlarmHigh = LIM.vWarnHigh + 2; else LIM.vWarnHigh = LIM.vAlarmHigh - 2; }
+  if (LIM.iWarn > LIM.iAlarm - 1) { if (k === "iWarn") LIM.iAlarm = LIM.iWarn + 1; else LIM.iWarn = LIM.iAlarm - 1; }
+  syncSliders(); refresh();
+}
+buildSliders();
+$("limit-sliders").addEventListener("input", (e) => { if (e.target.id.startsWith("sl-")) onLimit(e.target.id.slice(3), parseFloat(e.target.value)); });
+$("lim-reset").addEventListener("click", () => { Object.assign(LIM, LIM_DEFAULT); syncSliders(); refresh(); });
+
+$("chips").innerHTML = Object.keys(SCENARIOS).map((nm) => `<button class="chip" type="button" data-n="${nm}" aria-pressed="false">${NAMES[nm]}</button>`).join("");
+$("chips").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) load(b.dataset.n, state.seed); });
+$("play").addEventListener("click", play);
+$("step").addEventListener("input", (e) => { stop(); state.step = +e.target.value; render(); });
+$("speed").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.speed = +b.dataset.v;
+  document.querySelectorAll("#speed button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  if (state.timer) { stop(); play(); }
+});
+$("seed").addEventListener("change", (e) => { const v = Math.max(0, Math.min(9999, parseInt(e.target.value, 10) || 0)); e.target.value = v; load(state.name, v); });
+$("tab-run").addEventListener("click", () => showTab("run"));
+$("tab-all").addEventListener("click", () => showTab("all"));
+$("all-body").addEventListener("click", (e) => { const b = e.target.closest("[data-open]"); if (b) { showTab("run"); load(b.dataset.open, state.seed); } });
+if ("ResizeObserver" in window) new ResizeObserver(() => { if (state.data && !$("view-run").hidden) render(); }).observe(document.body);
+
+load("outage", 42);
+</script>
+
+</body>
+</html>
